@@ -1,51 +1,53 @@
 # Traduction manga / webtoon — pipeline IA
 
-Pipeline local de traduction et de localisation de planches (manga, manhwa, webtoon)
-du coreen, anglais, japonais ou chinois vers le francais. L'objectif est une
-traduction de qualite et, a terme, le redessin propre du texte sur l'image, en
-gardant la main sur le cout et la confidentialite grace a une execution locale.
+Application locale qui traduit un chapitre (coreen, anglais, japonais, chinois
+vers le francais) **sans abimer le dessin**, puis le met en forme et le publie.
+Elle tourne entierement sur le PC (127.0.0.1, protegee par mot de passe) et
+s'appuie sur un GPU NVIDIA pour les modeles de vision.
+
+Ce dossier documente l'architecture du projet au niveau conception (pas de code
+ni de secret) : c'est un exemple d'orchestration d'une chaine IA multi-etapes et
+multi-fournisseurs.
 
 ## Chaine de traitement
 
-1. **Detection des bulles et des zones de texte** — reperer sur la planche les
-   bulles, encadres et onomatopees a traiter.
-2. **OCR** — extraire le texte source de chaque zone, avec sa langue d'origine.
-3. **Effacement (inpainting)** — retirer le texte original de l'image sans abimer
-   le dessin, via un modele d'inpainting (LaMa).
-4. **Traduction** — traduire chaque segment vers le francais (voir la couche
-   multi-fournisseurs ci-dessous).
-5. **Lettrage** — replacer le texte traduit dans la zone, avec une police et une
-   mise en forme adaptees au support.
-6. **Export / publication** — assembler les planches traduites pour relecture
-   puis diffusion.
+1. **Detection** — un detecteur specialise bande dessinee (RT-DETR-v2, entraine
+   sur des milliers de pages manga / webtoon / comics) repere chaque bulle, le
+   texte dans les bulles et le texte hors bulle ; un OCR (EasyOCR) extrait les
+   lignes exactes et leur langue.
+2. **Effacement (inpainting)** — une bulle unie est repeinte avec sa couleur
+   exacte ; le texte pose sur le dessin est reconstruit par un modele LaMa
+   affine sur un grand corpus manga / anime, sur le GPU local.
+3. **Traduction** — un LLM recoit la page entiere (pour saisir qui parle, le ton,
+   le contexte) et le glossaire de la serie, puis renvoie les traductions en JSON.
+4. **Lettrage** — le francais epouse la forme reelle de la bulle (lignes plus
+   courtes en haut et en bas), avec une taille de police homogene sur la page.
+5. **Relecture / correction** — une interface liste chaque bulle (texte d'origine
+   relu + traduction) ; on corrige ou on ignore une zone, puis on re-lettre la
+   page instantanement, sans rappeler le LLM.
+6. **Publication** — les pages validees sont poussees vers le depot du site, qui
+   se redeploie tout seul.
 
-## Couche de traduction multi-fournisseurs + IA maison
+## Glossaire par serie
 
-Le coeur du projet est une couche de traduction interchangeable. Chaque segment
-peut etre traduit par un fournisseur distant (Gemini, OpenAI, Anthropic, Mistral)
-ou par un **modele maison local**, derriere une interface commune. On choisit le
-moteur par un simple parametre, sans toucher au reste de la chaine.
+Un glossaire par serie garde la coherence d'un chapitre a l'autre : noms propres,
+termes imposes, et notes de style (tutoiement, honorifiques). Il est enrichi au
+fil des chapitres et passe en contexte au LLM.
 
-- **Fournisseurs distants** — meilleure qualite brute sur les langues difficiles,
-  utiles comme reference et pour les cas complexes.
-- **Modele maison local** — execution hors-ligne, cout nul par page, confidentialite
-  totale, et surtout specialisable sur le vocabulaire et le ton du scantrad
-  (registres, onomatopees, conventions de ponctuation).
+## Evolution visee : multi-fournisseurs + modele maison
 
-Strategie visee : le modele maison traite la majorite des segments ; un fournisseur
-distant sert de secours sur les passages ou la confiance est basse, et de corpus de
-reference pour ameliorer le modele maison au fil du temps.
+Aujourd'hui la traduction passe par un moteur choisi en configuration (Gemini par
+defaut, avec bascule automatique entre modeles Gemini quand l'un sature ; Claude
+en option payante pour la meilleure qualite). L'objectif est d'ouvrir cette couche
+a plusieurs fournisseurs (Gemini, OpenAI, Anthropic, Mistral) **et** a un modele
+maison local specialise scantrad, derriere une interface commune. Detail dans
+ARCHITECTURE.md.
 
 ## Pourquoi c'est un projet data / IA interessant
 
-- Orchestration d'une chaine multi-etapes (vision, OCR, inpainting, NLP) avec des
-  points de reprise par etape.
-- Abstraction multi-fournisseurs avec bascule et repli, et comparaison de qualite
-  entre moteurs.
-- Boucle d'amelioration : collecter les corrections de relecture pour affiner le
-  modele maison (fine-tuning / adaptation de domaine).
-
-## Statut
-
-Prototype personnel autour du scantrad. Ce dossier decrit l'architecture cible ;
-le detail de la couche multi-fournisseurs est dans ARCHITECTURE.md.
+- Orchestration d'une chaine multi-etapes (vision, OCR, inpainting, NLP) avec
+  reprise possible a chaque etape.
+- Couche LLM unifiee, deja tolerante aux pannes (bascule de modeles, gestion de
+  quota, reprise), a etendre en vraie abstraction multi-fournisseurs.
+- Boucle d'amelioration : les corrections de relecture forment un corpus propre au
+  style du projet, reutilisable pour affiner un modele maison.
